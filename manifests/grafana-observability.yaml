@@ -1,0 +1,472 @@
+# Flawless local observability plane.
+# LogQL is provided by Loki; Tempo stores OTLP traces; Alloy collects pod logs
+# and accepts OTLP; Grafana is pre-provisioned with all three data sources.
+# Before applying this file, provision Secret `k8s-agent-grafana-admin` from
+# your secret manager with keys `admin-user` and `admin-password`. No default
+# credential is committed to this repository.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k8s-agent-loki-config
+  namespace: k8s-agent
+data:
+  loki.yaml: |
+    auth_enabled: false
+    server:
+      http_listen_port: 3100
+    common:
+      path_prefix: /var/loki
+      replication_factor: 1
+      ring:
+        kvstore:
+          store: inmemory
+      storage:
+        filesystem:
+          chunks_directory: /var/loki/chunks
+          rules_directory: /var/loki/rules
+    schema_config:
+      configs:
+        - from: "2024-01-01"
+          store: tsdb
+          object_store: filesystem
+          schema: v13
+          index:
+            prefix: flawless_index_
+            period: 24h
+    compactor:
+      working_directory: /var/loki/compactor
+      retention_enabled: true
+      delete_request_store: filesystem
+    limits_config:
+      retention_period: 168h
+      allow_structured_metadata: true
+      volume_enabled: true
+      ingestion_rate_mb: 12
+      ingestion_burst_size_mb: 24
+    analytics:
+      reporting_enabled: false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: k8s-agent-loki-data
+  namespace: k8s-agent
+spec:
+  storageClassName: standard
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-agent-loki
+  namespace: k8s-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: k8s-agent-loki}
+  template:
+    metadata:
+      labels: {app: k8s-agent-loki}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: loki
+          image: m.daocloud.io/docker.io/grafana/loki:3.7.3
+          imagePullPolicy: IfNotPresent
+          args: [-config.file=/etc/loki/loki.yaml]
+          ports:
+            - {name: http, containerPort: 3100}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 150m, memory: 256Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          readinessProbe:
+            httpGet: {path: /ready, port: 3100}
+            initialDelaySeconds: 10
+          livenessProbe:
+            httpGet: {path: /ready, port: 3100}
+            initialDelaySeconds: 30
+          volumeMounts:
+            - {name: config, mountPath: /etc/loki}
+            - {name: data, mountPath: /var/loki}
+      volumes:
+        - name: config
+          configMap: {name: k8s-agent-loki-config}
+        - name: data
+          persistentVolumeClaim: {claimName: k8s-agent-loki-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: k8s-agent-loki
+  namespace: k8s-agent
+spec:
+  selector: {app: k8s-agent-loki}
+  ports:
+    - {name: http, port: 3100, targetPort: 3100}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k8s-agent-tempo-config
+  namespace: k8s-agent
+data:
+  tempo.yaml: |
+    server:
+      http_listen_port: 3200
+    distributor:
+      receivers:
+        otlp:
+          protocols:
+            grpc:
+              endpoint: 0.0.0.0:4317
+            http:
+              endpoint: 0.0.0.0:4318
+    ingester:
+      max_block_duration: 5m
+    compactor:
+      compaction:
+        block_retention: 168h
+    storage:
+      trace:
+        backend: local
+        wal:
+          path: /var/tempo/wal
+        local:
+          path: /var/tempo/blocks
+    usage_report:
+      reporting_enabled: false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: k8s-agent-tempo-data
+  namespace: k8s-agent
+spec:
+  storageClassName: standard
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-agent-tempo
+  namespace: k8s-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: k8s-agent-tempo}
+  template:
+    metadata:
+      labels: {app: k8s-agent-tempo}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: tempo
+          image: m.daocloud.io/docker.io/grafana/tempo:2.10.5
+          imagePullPolicy: IfNotPresent
+          args: [-config.file=/etc/tempo/tempo.yaml]
+          ports:
+            - {name: http, containerPort: 3200}
+            - {name: otlp-grpc, containerPort: 4317}
+            - {name: otlp-http, containerPort: 4318}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 150m, memory: 256Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          readinessProbe:
+            httpGet: {path: /ready, port: 3200}
+            initialDelaySeconds: 10
+          volumeMounts:
+            - {name: config, mountPath: /etc/tempo}
+            - {name: data, mountPath: /var/tempo}
+      volumes:
+        - name: config
+          configMap: {name: k8s-agent-tempo-config}
+        - name: data
+          persistentVolumeClaim: {claimName: k8s-agent-tempo-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: k8s-agent-tempo
+  namespace: k8s-agent
+spec:
+  selector: {app: k8s-agent-tempo}
+  ports:
+    - {name: http, port: 3200, targetPort: 3200}
+    - {name: otlp-grpc, port: 4317, targetPort: 4317}
+    - {name: otlp-http, port: 4318, targetPort: 4318}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k8s-agent-alloy
+  namespace: k8s-agent
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k8s-agent-alloy-read
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log, namespaces, nodes]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8s-agent-alloy-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: k8s-agent-alloy-read
+subjects:
+  - kind: ServiceAccount
+    name: k8s-agent-alloy
+    namespace: k8s-agent
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k8s-agent-alloy-config
+  namespace: k8s-agent
+data:
+  config.alloy: |
+    logging { level = "info" }
+
+    discovery.kubernetes "pods" { role = "pod" }
+
+    discovery.relabel "pod_logs" {
+      targets = discovery.kubernetes.pods.targets
+      rule {
+        source_labels = ["__meta_kubernetes_pod_uid", "__meta_kubernetes_pod_container_name"]
+        separator = "/"
+        target_label = "__path__"
+        replacement = "/var/log/pods/*$1/*.log"
+      }
+      rule { source_labels = ["__meta_kubernetes_namespace"] target_label = "namespace" }
+      rule { source_labels = ["__meta_kubernetes_pod_name"] target_label = "pod" }
+      rule { source_labels = ["__meta_kubernetes_pod_container_name"] target_label = "container" }
+      rule { replacement = sys.env("CLUSTER_NAME") target_label = "cluster" }
+    }
+
+    local.file_match "pod_logs" { path_targets = discovery.relabel.pod_logs.output }
+    loki.source.file "pod_logs" {
+      targets = local.file_match.pod_logs.targets
+      forward_to = [loki.process.pod_logs.receiver]
+    }
+    loki.process "pod_logs" {
+      stage.cri { }
+      forward_to = [loki.write.default.receiver]
+    }
+    loki.write "default" {
+      endpoint { url = "http://k8s-agent-loki.k8s-agent.svc.cluster.local:3100/loki/api/v1/push" }
+    }
+
+    otelcol.receiver.otlp "default" {
+      grpc { endpoint = "0.0.0.0:4317" }
+      http { endpoint = "0.0.0.0:4318" }
+      output { traces = [otelcol.exporter.otlp.tempo.input] }
+    }
+    otelcol.exporter.otlp "tempo" {
+      client {
+        endpoint = "k8s-agent-tempo.k8s-agent.svc.cluster.local:4317"
+        tls { insecure = true }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: k8s-agent-alloy
+  namespace: k8s-agent
+spec:
+  selector:
+    matchLabels: {app: k8s-agent-alloy}
+  template:
+    metadata:
+      labels: {app: k8s-agent-alloy}
+    spec:
+      serviceAccountName: k8s-agent-alloy
+      securityContext:
+        runAsUser: 0
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: alloy
+          image: m.daocloud.io/docker.io/grafana/alloy:v1.16.1
+          imagePullPolicy: IfNotPresent
+          args: [run, /etc/alloy/config.alloy, --server.http.listen-addr=0.0.0.0:12345]
+          env:
+            - name: CLUSTER_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: k8s-agent-config
+                  key: LOCAL_CLUSTER_NAME
+          ports:
+            - {name: http, containerPort: 12345}
+            - {name: otlp-grpc, containerPort: 4317}
+            - {name: otlp-http, containerPort: 4318}
+          securityContext:
+            privileged: false
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 50m, memory: 96Mi}
+            limits: {cpu: 500m, memory: 512Mi}
+          volumeMounts:
+            - {name: config, mountPath: /etc/alloy, readOnly: true}
+            - {name: pod-logs, mountPath: /var/log/pods, readOnly: true}
+            - {name: positions, mountPath: /var/lib/alloy}
+      volumes:
+        - name: config
+          configMap: {name: k8s-agent-alloy-config}
+        - name: pod-logs
+          hostPath: {path: /var/log/pods, type: Directory}
+        - name: positions
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: k8s-agent-alloy
+  namespace: k8s-agent
+spec:
+  selector: {app: k8s-agent-alloy}
+  ports:
+    - {name: http, port: 12345, targetPort: 12345}
+    - {name: otlp-grpc, port: 4317, targetPort: 4317}
+    - {name: otlp-http, port: 4318, targetPort: 4318}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k8s-agent-grafana-datasources
+  namespace: k8s-agent
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Flawless Prometheus
+        uid: flawless-prometheus
+        type: prometheus
+        access: proxy
+        url: http://k8s-agent-prometheus.k8s-agent.svc.cluster.local:9090
+        isDefault: true
+      - name: Flawless Loki
+        uid: flawless-loki
+        type: loki
+        access: proxy
+        url: http://k8s-agent-loki.k8s-agent.svc.cluster.local:3100
+        jsonData:
+          derivedFields:
+            - name: TraceID
+              matcherRegex: '(?:trace_id|traceID)[=:]([a-fA-F0-9]{16,32})'
+              datasourceUid: flawless-tempo
+              url: '${__value.raw}'
+      - name: Flawless Tempo
+        uid: flawless-tempo
+        type: tempo
+        access: proxy
+        url: http://k8s-agent-tempo.k8s-agent.svc.cluster.local:3200
+        jsonData:
+          tracesToLogsV2:
+            datasourceUid: flawless-loki
+            spanStartTimeShift: -5m
+            spanEndTimeShift: 5m
+            filterByTraceID: true
+            filterBySpanID: false
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: k8s-agent-grafana-data
+  namespace: k8s-agent
+spec:
+  storageClassName: standard
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-agent-grafana
+  namespace: k8s-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: k8s-agent-grafana}
+  template:
+    metadata:
+      labels: {app: k8s-agent-grafana}
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 472
+        runAsGroup: 472
+        fsGroup: 472
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: grafana
+          image: m.daocloud.io/docker.io/grafana/grafana:13.0.2
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: GF_USERS_ALLOW_SIGN_UP, value: "false"}
+            - {name: GF_AUTH_ANONYMOUS_ENABLED, value: "false"}
+            - {name: GF_ANALYTICS_REPORTING_ENABLED, value: "false"}
+            - name: GF_SECURITY_ADMIN_USER
+              valueFrom: {secretKeyRef: {name: k8s-agent-grafana-admin, key: admin-user}}
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom: {secretKeyRef: {name: k8s-agent-grafana-admin, key: admin-password}}
+          ports:
+            - {name: http, containerPort: 3000}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: {drop: [ALL]}
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: "1", memory: 1Gi}
+          readinessProbe:
+            httpGet: {path: /api/health, port: 3000}
+            initialDelaySeconds: 15
+          volumeMounts:
+            - {name: datasources, mountPath: /etc/grafana/provisioning/datasources, readOnly: true}
+            - {name: data, mountPath: /var/lib/grafana}
+      volumes:
+        - name: datasources
+          configMap: {name: k8s-agent-grafana-datasources}
+        - name: data
+          persistentVolumeClaim: {claimName: k8s-agent-grafana-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: k8s-agent-grafana
+  namespace: k8s-agent
+spec:
+  selector: {app: k8s-agent-grafana}
+  ports:
+    - {name: http, port: 3000, targetPort: 3000}

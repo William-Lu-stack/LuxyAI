@@ -1,0 +1,32 @@
+name: Bug report
+description: Report a reproducible issue
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Include commands, manifests, and scope. Do not include secrets.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Run ./scripts/quickstart.sh doctor and paste its output. Add Kubernetes version, deployment mode, image tag, model provider, and observability stack. Remove any secrets.
+    validations:
+      required: true

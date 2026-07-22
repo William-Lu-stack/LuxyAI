@@ -1,0 +1,238 @@
+# ============================================================
+# RBAC — k8s-agent namespace + 跨 namespace 操作权限
+#
+# k8s-agent-sa 需要对集群内常见 K8S 资源具备只读和受控 patch 权限。
+# 实际可操作 namespace 仍由应用侧 ALLOWED_NAMESPACES 二次保护。
+# ============================================================
+
+---
+# Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: k8s-agent
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+
+---
+# ServiceAccount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k8s-agent-sa
+  namespace: k8s-agent
+
+---
+# ============================================================
+# ClusterRole — 所有 namespace 只读发现权限
+# ============================================================
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k8s-agent-reader
+rules:
+  - apiGroups: [""]
+    resources:
+      - namespaces
+      - pods
+      - pods/log
+      - pods/status
+      - events
+      - nodes
+      - services
+      - endpoints
+      - persistentvolumeclaims
+      - persistentvolumes
+      - configmaps
+      - secrets
+    verbs: [get, list, watch]
+
+  # Secret values may be decoded for diagnosis, but every API/LLM/audit response
+  # passes through server-side redaction and never persists raw values.
+  - apiGroups: [""]
+    resources:
+      - resourcequotas
+    verbs: [get, list]
+
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - deployments/scale
+      - statefulsets
+      - statefulsets/scale
+      - daemonsets
+      - replicasets
+    verbs: [get, list, watch]
+
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+    verbs: [get, list]
+
+  - apiGroups: ["policy"]
+    resources:
+      - poddisruptionbudgets
+    verbs: [get, list, watch]
+
+  - apiGroups: ["metrics.k8s.io"]
+    resources:
+      - pods
+      - nodes
+    verbs: [get, list]
+
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+      - networkpolicies
+    verbs: [get, list]
+
+  - apiGroups: ["discovery.k8s.io"]
+    resources:
+      - endpointslices
+    verbs: [get, list, watch]
+
+  - apiGroups: ["storage.k8s.io"]
+    resources:
+      - storageclasses
+    verbs: [get, list]
+
+  - apiGroups: ["authorization.k8s.io"]
+    resources:
+      - selfsubjectaccessreviews
+    verbs: [create]
+
+  - apiGroups: ["networking.istio.io"]
+    resources:
+      - virtualservices
+      - destinationrules
+      - gateways
+    verbs: [get, list]
+
+---
+# ClusterRoleBinding — 绑定到 k8s-agent-sa
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8s-agent-reader-binding
+subjects:
+  - kind: ServiceAccount
+    name: k8s-agent-sa
+    namespace: k8s-agent
+roleRef:
+  kind: ClusterRole
+  name: k8s-agent-reader
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# 修复权限不做 ClusterRoleBinding。每个获批 namespace 必须单独创建 RoleBinding，
+# 示例见 remediation-rolebinding.example.yaml。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k8s-agent-remediator
+rules:
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - deployments/scale
+      - statefulsets
+      - statefulsets/scale
+      - daemonsets
+    verbs: [get, patch]
+
+  # Namespace RoleBinding + ALLOWED_NAMESPACES remain the two authorization
+  # boundaries for every mutable action.
+  - apiGroups: [""]
+    resources:
+      - pods
+    verbs: [get, create, delete]
+  - apiGroups: [""]
+    resources:
+      - pods/exec
+    verbs: [create, get]
+  - apiGroups: ["policy"]
+    resources:
+      - pods/eviction
+    verbs: [create]
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+    verbs: [get, patch]
+  - apiGroups: [""]
+    resources:
+      - persistentvolumeclaims
+    verbs: [get, create, patch]
+  - apiGroups: [""]
+    resources:
+      - serviceaccounts
+    verbs: [get, patch]
+  - apiGroups: [""]
+    resources:
+      - configmaps
+      - secrets
+    verbs: [get, create, patch, update, delete]
+
+---
+# Optional high-risk node containment capability. It deliberately has no
+# binding. Security administrators may bind it only after reviewing the node
+# isolation runbook and approval workflow.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k8s-agent-node-containment
+rules:
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [get, patch]
+
+---
+# Optional release-management capability. It deliberately has no binding.
+# Bind it with a namespace RoleBinding only where this platform is the approved release entrypoint.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k8s-agent-release-manager
+rules:
+  - apiGroups: ["apps"]
+    resources: [deployments, statefulsets, daemonsets]
+    verbs: [get, create, patch]
+  - apiGroups: [""]
+    resources: [services]
+    verbs: [get, patch]
+  - apiGroups: ["policy"]
+    resources: [poddisruptionbudgets]
+    verbs: [get, patch]
+
+---
+# Optional high-risk storage provisioning capability. It deliberately has no
+# binding. Bind it only for clusters where the platform is allowed to create static
+# PVs after human approval; hostPath PVs are still rejected by application policy.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k8s-agent-storage-provisioner
+rules:
+  - apiGroups: [""]
+    resources: [persistentvolumes]
+    verbs: [get, create]
+  - apiGroups: [""]
+    resources: [persistentvolumeclaims]
+    verbs: [get, create, patch]
+
+---
+# 仅允许平台在自己的 namespace 做自愈；业务 namespace 需显式授权。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k8s-agent-platform-remediator
+  namespace: k8s-agent
+subjects:
+  - kind: ServiceAccount
+    name: k8s-agent-sa
+    namespace: k8s-agent
+roleRef:
+  kind: ClusterRole
+  name: k8s-agent-remediator
+  apiGroup: rbac.authorization.k8s.io

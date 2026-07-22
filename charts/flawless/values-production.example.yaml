@@ -1,0 +1,193 @@
+# Sanitized production example for a generic Rancher environment.
+#
+# Secrets are intentionally excluded. Create `k8s-agent-oauth` with:
+# - RANCHER_TOKEN
+# - OAUTH_CLIENT_ID
+# - OAUTH_CLIENT_SECRET
+# Never put bearer tokens or client secrets in this file or a ConfigMap.
+
+fullnameOverride: k8s-agent
+namespaceOverride: k8s-agent
+
+image:
+  repository: m.daocloud.io/ghcr.io/your-org/flawless
+  tag: 3.2.2
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+api:
+  replicas: 1
+
+agents:
+  replicas: 2
+
+service:
+  type: NodePort
+  apiPort: 8080
+  nodePort: 30080
+
+persistence:
+  enabled: true
+  existingClaim: ""
+  storageClass: rwx-storage-class
+  accessModes: [ReadWriteMany]
+  size: 5Gi
+  # Repair ownership left by an older root-running release. If admission
+  # forbids UID 0 init containers, disable this only after the storage
+  # administrator grants UID/GID 10001 write permission on the volume.
+  volumePermissions:
+    enabled: true
+    runAsUser: 10001
+    runAsGroup: 10001
+
+serviceAccount:
+  create: true
+  name: k8s-agent-sa
+
+rbac:
+  mode: controlled
+
+secrets:
+  oauth: k8s-agent-oauth
+  langfuse: k8s-agent-langfuse
+  consoleAuth: flawless-console-auth
+  privateAlgorithms: flawless-custom-algorithms
+  clusterCredentials: flawless-cluster-credentials
+
+config:
+  AI_INSPECTION_INTERVAL_MINUTES: "30"
+  ALLOWED_NAMESPACES: k8s-agent
+  AUTO_HEALING_ENABLED: "true"
+  AUTO_OPS_CONFIGMAP_TEMPLATES_JSON: '{}'
+  AUTO_OPS_DEFAULT_MEMORY_LIMIT: 1Gi
+  AUTO_OPS_DEFAULT_PVC_ACCESS_MODE: ReadWriteOnce
+  AUTO_OPS_DEFAULT_PVC_SIZE: 10Gi
+  AUTO_OPS_DEFAULT_STORAGE_CLASS: rwx-storage-class
+  AUTO_OPS_MAX_ATTEMPTS: "4"
+  AUTO_OPS_MAX_MEMORY_GI: "8"
+  AUTO_OPS_MEMORY_GROWTH_FACTOR: "1.5"
+  AUTO_OPS_STATIC_PV_NFS_BASE_PATH: ""
+  AUTO_OPS_STATIC_PV_NFS_SERVER: ""
+  AUTO_OPS_STATIC_PV_RECLAIM_POLICY: Retain
+  AUTO_OPS_STATIC_PV_TEMPLATE_JSON: '{}'
+
+  # Autonomous escalation is disabled. Every mutating step requires a matched
+  # Skill and explicit operator approval.
+  AUTONOMOUS_OPS_ENABLED: "false"
+  OPS_MUTATION_ENABLED: "true"
+  OPS_STEPWISE_CONFIRMATION_REQUIRED: "true"
+  SKILL_EXECUTION_REQUIRED: "true"
+
+  BEYLA_FLOW_QUERY_WINDOW: 5m
+  BEYLA_LOKI_FLOW_ENABLED: "true"
+  BEYLA_LOKI_FLOW_LIMIT: "500"
+  BEYLA_LOKI_NAMESPACE: flawless-ebpf
+  BEYLA_LOKI_POD_SELECTOR: flawless-beyla.*
+
+  CACHE_MAX_ITEMS: "256"
+  CACHE_TTL_RANCHER_CLUSTERS: "45"
+  CACHE_TTL_RANCHER_INVENTORY: "15"
+  CLOUD_ADAPTERS_JSON: '[]'
+
+  CMDB_ALLOWED_NAMESPACES: all
+  CMDB_URL: http://k8s-agent-cmdb.k8s-agent.svc.cluster.local:8300
+  CONSOLE_AUTH_REQUIRED: "false"
+  CONSOLE_TRUSTED_IDENTITY_HEADER: x-auth-request-user
+  CORS_ALLOW_ORIGINS: ""
+  DEFAULT_IMAGE_PULL_SECRET: ""
+  DISABLE_OPENAPI_DOCS: "true"
+
+  ELK_NAMESPACE: logging
+  ELK_SERVICE: elk
+  EMBEDDING_GATEWAY_BASE: https://llm-gateway.example.com/v1
+  EMBEDDING_MODEL: your-embedding-model
+  KNOWLEDGE_EMBEDDING_ENABLED: "true"
+  KNOWLEDGE_MAX_UPLOAD_BYTES: "20971520"
+  KNOWLEDGE_RUNTIME_WRITE_ENABLED: "true"
+
+  GRAFANA_URL: http://k8s-agent-grafana.k8s-agent.svc.cluster.local:3000
+  HEALING_SCALE_DELTA: "1"
+  HTTP_MAX_CONNECTIONS: "256"
+  HTTP_MAX_KEEPALIVE_CONNECTIONS: "64"
+  IN_MEMORY_STORE_LIMIT: "1000"
+  INSPECTION_MAX_EVENT_FETCHES_PER_CLUSTER: "40"
+  INSPECTION_SKILL_ROUTER_ENABLED: "true"
+  INSPECTION_SKILL_ROUTER_TIMEOUT_SECONDS: "18"
+
+  LANGFUSE_ENABLED: "false"
+  LANGFUSE_HOST: https://observability.example.com
+
+  LLM_API_BASE: https://llm-gateway.example.com/v1
+  LLM_AUTH_TYPE: oauth_client_credentials
+  LLM_CONNECT_TIMEOUT_SECONDS: "5"
+  LLM_DIAGNOSIS_MAX_TOKENS: "1400"
+  LLM_ESTIMATED_TOKENS_PER_CALL: "1800"
+  LLM_ESTIMATED_TOKENS_PER_INSPECTION: "3600"
+  LLM_GATEWAY_BASE: https://llm-gateway.example.com/v1
+  LLM_HTTP_KEEPALIVE_CONNECTIONS: "16"
+  LLM_HTTP_KEEPALIVE_SECONDS: "30"
+  LLM_HTTP_MAX_CONNECTIONS: "64"
+  LLM_MODEL: your-model
+  LLM_PROFILE_ID: primary
+  LLM_PROVIDER: openai-compatible
+  LLM_READ_TIMEOUT_SECONDS: "45"
+  LLM_VERIFY_SSL: "true"
+  MODEL_PROFILE_RUNTIME_WRITE_ENABLED: "true"
+  MODEL_PROFILES_JSON: '[{"id":"primary","provider":"openai-compatible","model":"your-model","base_url":"https://llm-gateway.example.com/v1","auth_type":"oauth_client_credentials","role":"primary","weight":100,"max_tokens":4096,"verify_ssl":true}]'
+  MODEL_ROUTING_STRATEGY: primary-with-shadow-eval
+  MODEL_SHADOW_EVAL_ENABLED: "false"
+
+  OAUTH_TOKEN_URL: https://iam.example.com/oauth2/token
+  OAUTH_VERIFY_SSL: "true"
+
+  LOCAL_CLUSTER_NAME: local
+  LOG_LEVEL: INFO
+  LOGGING_KAFKA_NAMESPACE: kafka
+  LOGGING_KAFKA_SERVICE: kafka
+  LOKI_URL: http://k8s-agent-loki.k8s-agent.svc.cluster.local:3100
+  MAX_INFLIGHT_REQUESTS: "256"
+  MAX_OUTBOUND_CONCURRENCY: "96"
+  MAX_PATCH_REPLICAS: "20"
+  MAX_REQUEST_BODY_BYTES: "2097152"
+  MIDDLEWARE_CLUSTER_NAME: middleware-cluster
+
+  OBSERVABILITY_AGENT_URL: http://k8s-agent-agents.k8s-agent.svc.cluster.local:8100
+  OPS_APPROVED_SCRIPTS_JSON: '[]'
+  OPS_CHANGE_TIMEOUT_SECONDS: "45"
+  OPS_EVIDENCE_TIMEOUT_SECONDS: "70"
+  OPS_HEARTBEAT_SECONDS: "5"
+  OPS_MAX_CONCURRENT_JOBS: "4"
+  OPS_CONTINUATION_INTERVAL_SECONDS: "30"
+  OPS_STEP_APPROVAL_TIMEOUT_SECONDS: "0"
+  OPS_STEP_TIMEOUT_SECONDS: "35"
+  OPS_VERIFY_INTERVAL_SECONDS: "5"
+  OPS_VERIFY_TIMEOUT_SECONDS: "45"
+  OUTBOUND_BULKHEAD_TIMEOUT_SECONDS: "2.0"
+  OUTBOUND_VERIFY_SSL: "true"
+
+  PLATFORM_CORE_SERVICES: observability,healing,incident,postmortem,adapter,mcp
+  PLATFORM_NAMESPACE: k8s-agent
+  PLATFORM_SELF_HEAL_COOLDOWN_SECONDS: "300"
+  PLATFORM_SELF_HEAL_ENABLED: "false"
+  PLATFORM_WORKLOAD_NAME: k8s-agent-agents
+
+  PROMETHEUS_CLUSTER_LABEL: cluster
+  PROMETHEUS_CLUSTER_LABELS: cluster,cluster_id,rancher_cluster_id,cluster_name
+  PROMETHEUS_URL: http://k8s-agent-prometheus.k8s-agent.svc.cluster.local:9090
+
+  # RANCHER_TOKEN is injected from Secret k8s-agent-oauth.
+  RANCHER_CLUSTER_IDS: all
+  RANCHER_URL: https://rancher.example.com
+  RANCHER_VERIFY_SSL: "true"
+
+  RELIABILITY_STORE_EMERGENCY_PATH: /dev/shm/flawless/reliability-state.json
+  REQUEST_BULKHEAD_TIMEOUT_SECONDS: "1.5"
+  SECURITY_HEADERS_ENABLED: "true"
+  SLO_DEFAULT_TARGET_PERCENT: "99.9"
+  SLO_DEFAULT_WINDOW_DAYS: "30"
+  TEMPO_URL: http://k8s-agent-tempo.k8s-agent.svc.cluster.local:3200
+  WRITE_RATE_LIMIT_PER_MINUTE: "120"
+
+  NODE_EXEC_NAMESPACE: flawless-node-exec
+  NODE_EXEC_IMAGE: m.daocloud.io/ghcr.io/your-org/flawless-node-exec:1.36

@@ -1,0 +1,16 @@
+{{- if and .Values.persistence.enabled (not .Values.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "flawless.runtimeClaim" . }}
+  namespace: {{ include "flawless.namespace" . }}
+  labels:
+    {{- include "flawless.labels" . | nindent 4 }}
+spec:
+  storageClassName: {{ .Values.persistence.storageClass | quote }}
+  accessModes:
+    {{- toYaml .Values.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+{{- end }}

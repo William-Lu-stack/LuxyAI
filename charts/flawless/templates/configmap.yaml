@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "flawless.fullname" . }}-config
+  namespace: {{ include "flawless.namespace" . }}
+  labels:
+    {{- include "flawless.labels" . | nindent 4 }}
+data:
+  APP_BUILD_VERSION: {{ .Chart.AppVersion | quote }}
+  {{- range $key, $value := .Values.config }}
+  {{ $key }}: {{ $value | quote }}
+  {{- end }}
+  CONSOLE_ADMIN_MODE: {{ ternary "true" "false" .Values.admin.enabled | quote }}
+  CONSOLE_ADMIN_USERS: {{ .Values.admin.users | quote }}
+  CONSOLE_ADMIN_TRUSTED_IDENTITY: {{ ternary "true" "false" .Values.admin.trustIdentityHeader | quote }}
+  OBSERVABILITY_URL: {{ printf "http://%s-agents:8100" (include "flawless.fullname" .) | quote }}
+  HEALING_AGENT_URL: {{ printf "http://%s-agents:8101/a2a/tasks" (include "flawless.fullname" .) | quote }}
+  INCIDENT_AGENT_URL: {{ printf "http://%s-agents:8102/a2a/tasks" (include "flawless.fullname" .) | quote }}
+  POSTMORTEM_AGENT_URL: {{ printf "http://%s-agents:8103/a2a/tasks" (include "flawless.fullname" .) | quote }}
+  MCP_SERVER_URL: {{ printf "http://%s-agents:8105/mcp" (include "flawless.fullname" .) | quote }}
+  ADAPTER_URL: {{ printf "http://%s-agents:8200" (include "flawless.fullname" .) | quote }}
+  MODEL_PROFILES_STORE: /var/lib/flawless/model-profiles.json
+  KNOWLEDGE_STORE_PATH: /var/lib/flawless/knowledge-base.json
+  OPS_SKILL_ROOT: /var/lib/flawless/ops-skills
+  OPS_SKILL_STORE_PATH: /var/lib/flawless/ops-skills.json
+  OPS_JOB_STORE_PATH: /var/lib/flawless/ops-jobs.json
+  RELIABILITY_STORE_PATH: /var/lib/flawless/reliability-state.json
+  RELIABILITY_STORE_FALLBACK_PATH: /tmp/flawless/reliability-state.json
+  EFFECTIVENESS_STORE_PATH: /var/lib/flawless/effectiveness-state.json
+  EFFECTIVENESS_STORE_FALLBACK_PATH: /tmp/flawless-effectiveness-state.json
+  FLAWLESS_CUSTOM_ALGORITHM_PATH: /var/lib/flawless-custom/aiops_algorithms_custom.py

@@ -1,0 +1,160 @@
+# Optional eBPF data-flow collector.
+# Deploy this only when the cluster does not already provide Hubble/Calico
+# Flow Logs/Goldmane or an enterprise eBPF collector.
+#
+# Apply order:
+#   kubectl apply -f manifests/grafana-observability.yaml
+#   kubectl apply -f manifests/ebpf-beyla.yaml
+#   kubectl rollout restart deployment/flawless -n k8s-agent
+#
+# Why a separate namespace:
+#   Real eBPF network observation needs host-level visibility. Keeping it in
+#   flawless-ebpf avoids giving privileged permissions to the application pods.
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: flawless-ebpf
+  labels:
+    app.kubernetes.io/name: flawless-ebpf
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flawless-beyla
+  namespace: flawless-ebpf
+  labels:
+    app.kubernetes.io/name: flawless-beyla
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: flawless-beyla-read
+rules:
+  - apiGroups: ["apps"]
+    resources: ["replicasets", "deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods", "services", "nodes", "namespaces"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: flawless-beyla-read
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: flawless-beyla-read
+subjects:
+  - kind: ServiceAccount
+    name: flawless-beyla
+    namespace: flawless-ebpf
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: flawless-beyla-config
+  namespace: flawless-ebpf
+data:
+  beyla-config.yml: |
+    attributes:
+      kubernetes:
+        enable: true
+      select:
+        beyla.network.flow.bytes:
+          include:
+            - k8s.src.owner.name
+            - k8s.src.owner.type
+            - k8s.src.namespace
+            - k8s.src.name
+            - k8s.src.type
+            - k8s.dst.owner.name
+            - k8s.dst.owner.type
+            - k8s.dst.namespace
+            - k8s.dst.name
+            - k8s.dst.type
+            - k8s.cluster.name
+            - src.address
+            - dst.address
+            - dst.port
+            - transport
+        beyla_network_flow_bytes:
+          include:
+            - k8s.src.owner.name
+            - k8s.src.owner.type
+            - k8s.src.namespace
+            - k8s.src.name
+            - k8s.src.type
+            - k8s.dst.owner.name
+            - k8s.dst.owner.type
+            - k8s.dst.namespace
+            - k8s.dst.name
+            - k8s.dst.type
+            - k8s.cluster.name
+            - src.address
+            - dst.address
+            - dst.port
+            - transport
+    network:
+      enable: true
+      print_flows: true
+    log_level: info
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: flawless-beyla
+  namespace: flawless-ebpf
+  labels:
+    app.kubernetes.io/name: flawless-beyla
+    app: flawless-beyla
+spec:
+  selector:
+    matchLabels:
+      app: flawless-beyla
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: flawless-beyla
+        app: flawless-beyla
+    spec:
+      serviceAccountName: flawless-beyla
+      hostNetwork: true
+      hostPID: true
+      dnsPolicy: ClusterFirstWithHostNet
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: beyla
+          image: m.daocloud.io/docker.io/grafana/beyla:3.24.0
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: BEYLA_CONFIG_PATH
+              value: /config/beyla-config.yml
+            - name: BEYLA_NETWORK_METRICS
+              value: "true"
+            - name: BEYLA_KUBE_METADATA_ENABLE
+              value: "true"
+          securityContext:
+            privileged: true
+            allowPrivilegeEscalation: true
+            readOnlyRootFilesystem: false
+          resources:
+            requests:
+              cpu: 80m
+              memory: 128Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: beyla-config
+              mountPath: /config
+              readOnly: true
+      volumes:
+        - name: beyla-config
+          configMap:
+            name: flawless-beyla-config

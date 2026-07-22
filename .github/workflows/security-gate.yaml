@@ -1,0 +1,86 @@
+name: security-gate
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/modern/package-lock.json
+      - name: Python dependency audit
+        run: |
+          python -m pip install --upgrade pip pip-audit
+          pip-audit -r requirements.lock --no-deps --disable-pip
+      - name: Verify local one-click deployment contract
+        run: |
+          bash scripts/check-public-sanitization.sh
+          bash -n scripts/install.sh scripts/install-macos.sh scripts/install-linux.sh scripts/quickstart.sh scripts/linux/*.sh
+          pwsh -NoProfile -Command '$failed = $false; Get-ChildItem "scripts/install-windows.ps1", "scripts/windows/*.ps1" | ForEach-Object { $tokens = $null; $errors = $null; [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors) | Out-Null; if ($errors.Count) { $failed = $true; $errors | ForEach-Object { Write-Error "$($_.Extent.File):$($_.Extent.StartLineNumber): $($_.Message)" } } }; if ($failed) { exit 1 }'
+          python scripts/run_local_stack.py --check > /dev/null
+          python -m pip install --require-hashes -r requirements.lock
+          python -m unittest discover -s tests -v
+          npm --prefix frontend/modern ci --no-audit --no-fund
+          npm --prefix frontend/modern run build
+      - name: Compile and parse manifests
+        run: |
+          python -m pip install pyyaml
+          python -m compileall -q backend agents mcp_servers cmdb cloud a2a openwebui
+          python - <<'PY'
+          import glob, yaml
+          for path in glob.glob("manifests/*.yaml"):
+              list(yaml.safe_load_all(open(path, encoding="utf-8")))
+              print("validated", path)
+          PY
+      - name: Build backend and frontend images
+        run: |
+          docker build --target backend-runtime -t flawless:${{ github.sha }} .
+          docker build --target frontend-runtime -t flawless-web:${{ github.sha }} .
+      - name: Report all backend image vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: flawless:${{ github.sha }}
+          format: table
+          exit-code: "0"
+          severity: CRITICAL,HIGH
+      - name: Block fixable backend image vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: flawless:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+      - name: Report all frontend image vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: flawless-web:${{ github.sha }}
+          format: table
+          exit-code: "0"
+          severity: CRITICAL,HIGH
+      - name: Block fixable frontend image vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: flawless-web:${{ github.sha }}
+          format: table
+          exit-code: "1"
+          ignore-unfixed: true
+          severity: CRITICAL,HIGH
+      - uses: anchore/sbom-action@v0
+        with:
+          image: flawless:${{ github.sha }}
+          artifact-name: flawless-${{ github.sha }}.spdx.json

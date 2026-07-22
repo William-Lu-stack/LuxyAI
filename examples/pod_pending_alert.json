@@ -1,0 +1,18 @@
+{
+  "alerts": [
+    {
+      "labels": {
+        "alertname": "KubePodPending",
+        "namespace": "default",
+        "deployment": "metric-processor",
+        "service": "metric-processor",
+        "severity": "P2",
+        "priority": "high"
+      },
+      "annotations": {
+        "summary": "metric-processor pod stuck in Pending state",
+        "description": "Pod has been pending for over 10 minutes, possibly due to insufficient resources"
+      }
+    }
+  ]
+}

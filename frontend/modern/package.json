@@ -1,0 +1,29 @@
+{
+  "name": "flawless-console",
+  "version": "3.2.2",
+  "license": "SEE LICENSE IN LICENSE",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 5173",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4173"
+  },
+  "dependencies": {
+    "@dagrejs/dagre": "^3.0.0",
+    "@vitejs/plugin-react": "^5.1.2",
+    "@xyflow/react": "^12.11.1",
+    "lucide-react": "^0.475.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "three": "^0.185.0",
+    "vite": "^8.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/three": "^0.185.0",
+    "playwright-core": "^1.61.1",
+    "typescript": "^5.8.0"
+  }
+}

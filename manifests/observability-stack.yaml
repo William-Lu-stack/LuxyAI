@@ -1,0 +1,489 @@
+# ============================================================
+# Local CMDB + Prometheus Stack for k8s-agent
+#
+# 部署顺序:
+#   kubectl apply -f manifests/rbac.yaml
+#   kubectl apply -f manifests/deployment.yaml
+#   kubectl apply -f manifests/observability-stack.yaml
+#   kubectl apply -f manifests/frontend.yaml
+#
+# 说明:
+# - local-cmdb 使用本项目业务镜像启动，自动扫描 Kubernetes 资源并输出应用拓扑。
+# - prometheus/kube-state-metrics 默认使用已验证可解析的国内镜像地址。
+# - 如果你的集群只能拉组织 Harbor，把下面 image 替换成同步后的私有网络镜像即可。
+# ============================================================
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-agent-cmdb
+  namespace: k8s-agent
+  labels:
+    app: k8s-agent-cmdb
+    component: cmdb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: k8s-agent-cmdb
+  template:
+    metadata:
+      labels:
+        app: k8s-agent-cmdb
+    spec:
+      serviceAccountName: k8s-agent-sa
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: cmdb
+          image: m.daocloud.io/ghcr.io/your-org/flawless:3.2.2
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -c
+          args:
+            - |
+              python -c "from cmdb.local_cmdb import app; print('CMDB_IMPORT_OK')" &&
+              exec uvicorn cmdb.local_cmdb:app --host 0.0.0.0 --port 8300
+          ports:
+            - name: http
+              containerPort: 8300
+          envFrom:
+            - configMapRef:
+                name: k8s-agent-config
+            - secretRef:
+                name: k8s-agent-oauth
+                optional: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 80m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            tcpSocket:
+              port: 8300
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 6
+          readinessProbe:
+            tcpSocket:
+              port: 8300
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          startupProbe:
+            tcpSocket:
+              port: 8300
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 24
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: k8s-agent-cmdb
+  namespace: k8s-agent
+  labels:
+    app: k8s-agent-cmdb
+spec:
+  selector:
+    app: k8s-agent-cmdb
+  ports:
+    - name: http
+      port: 8300
+      targetPort: 8300
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k8s-agent-prometheus
+  namespace: k8s-agent
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k8s-agent-prometheus
+rules:
+  - apiGroups: [""]
+    resources:
+      - nodes
+      - nodes/proxy
+      - services
+      - endpoints
+      - pods
+      - namespaces
+    verbs: [get, list, watch]
+  - apiGroups: ["extensions", "networking.k8s.io"]
+    resources:
+      - ingresses
+    verbs: [get, list, watch]
+  - nonResourceURLs:
+      - /metrics
+    verbs: [get]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8s-agent-prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: k8s-agent-prometheus
+subjects:
+  - kind: ServiceAccount
+    name: k8s-agent-prometheus
+    namespace: k8s-agent
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k8s-agent-prometheus-config
+  namespace: k8s-agent
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 30s
+      evaluation_interval: 30s
+
+    scrape_configs:
+      - job_name: kubernetes-apiservers
+        kubernetes_sd_configs:
+          - role: endpoints
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: default;kubernetes;https
+
+      - job_name: kubernetes-nodes
+        kubernetes_sd_configs:
+          - role: node
+        scheme: https
+        tls_config:
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - target_label: __address__
+            replacement: kubernetes.default.svc:443
+          - source_labels: [__meta_kubernetes_node_name]
+            regex: (.+)
+            target_label: __metrics_path__
+            replacement: /api/v1/nodes/${1}/proxy/metrics
+
+      - job_name: kubernetes-cadvisor
+        kubernetes_sd_configs:
+          - role: node
+        scheme: https
+        tls_config:
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - target_label: __address__
+            replacement: kubernetes.default.svc:443
+          - source_labels: [__meta_kubernetes_node_name]
+            regex: (.+)
+            target_label: __metrics_path__
+            replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
+
+      - job_name: kube-state-metrics
+        static_configs:
+          - targets:
+              - k8s-agent-kube-state-metrics.k8s-agent.svc.cluster.local:8080
+
+      - job_name: k8s-agent-services
+        kubernetes_sd_configs:
+          - role: endpoints
+            namespaces:
+              names:
+                - k8s-agent
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: k8s-agent-prometheus-data
+  namespace: k8s-agent
+  labels:
+    app: k8s-agent-prometheus
+    component: tsdb
+spec:
+  storageClassName: standard
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 30Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-agent-prometheus
+  namespace: k8s-agent
+  labels:
+    app: k8s-agent-prometheus
+    component: prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: k8s-agent-prometheus
+  template:
+    metadata:
+      labels:
+        app: k8s-agent-prometheus
+    spec:
+      serviceAccountName: k8s-agent-prometheus
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: prometheus
+          image: registry.cn-hangzhou.aliyuncs.com/google_containers/prometheus:v2.45.0
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=7d
+            - --web.enable-lifecycle
+          ports:
+            - name: http
+              containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: data
+              mountPath: /prometheus
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 2Gi
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9090
+            initialDelaySeconds: 20
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9090
+            initialDelaySeconds: 10
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: k8s-agent-prometheus-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: k8s-agent-prometheus-data
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: k8s-agent-prometheus
+  namespace: k8s-agent
+  labels:
+    app: k8s-agent-prometheus
+spec:
+  selector:
+    app: k8s-agent-prometheus
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k8s-agent-kube-state-metrics
+  namespace: k8s-agent
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: k8s-agent-kube-state-metrics
+rules:
+  - apiGroups: [""]
+    resources:
+      - configmaps
+      - nodes
+      - pods
+      - services
+      - serviceaccounts
+      - resourcequotas
+      - replicationcontrollers
+      - limitranges
+      - persistentvolumeclaims
+      - persistentvolumes
+      - namespaces
+      - endpoints
+    verbs: [list, watch]
+  - apiGroups: ["apps"]
+    resources:
+      - statefulsets
+      - daemonsets
+      - deployments
+      - replicasets
+    verbs: [list, watch]
+  - apiGroups: ["batch"]
+    resources:
+      - cronjobs
+      - jobs
+    verbs: [list, watch]
+  - apiGroups: ["autoscaling"]
+    resources:
+      - horizontalpodautoscalers
+    verbs: [list, watch]
+  - apiGroups: ["storage.k8s.io"]
+    resources:
+      - storageclasses
+    verbs: [list, watch]
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - ingresses
+    verbs: [list, watch]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8s-agent-kube-state-metrics
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: k8s-agent-kube-state-metrics
+subjects:
+  - kind: ServiceAccount
+    name: k8s-agent-kube-state-metrics
+    namespace: k8s-agent
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-agent-kube-state-metrics
+  namespace: k8s-agent
+  labels:
+    app: k8s-agent-kube-state-metrics
+    component: kube-state-metrics
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: k8s-agent-kube-state-metrics
+  template:
+    metadata:
+      labels:
+        app: k8s-agent-kube-state-metrics
+    spec:
+      serviceAccountName: k8s-agent-kube-state-metrics
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        runAsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: kube-state-metrics
+          image: m.daocloud.io/registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.10.1
+          imagePullPolicy: IfNotPresent
+          args:
+            - --port=8080
+            - --telemetry-port=8081
+            - --resources=pods,nodes,namespaces,services,endpoints,deployments,statefulsets,daemonsets,replicasets,persistentvolumeclaims,persistentvolumes,storageclasses,horizontalpodautoscalers,jobs,cronjobs,ingresses
+          ports:
+            - name: http-metrics
+              containerPort: 8080
+            - name: telemetry
+              containerPort: 8081
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: k8s-agent-kube-state-metrics
+  namespace: k8s-agent
+  labels:
+    app: k8s-agent-kube-state-metrics
+spec:
+  selector:
+    app: k8s-agent-kube-state-metrics
+  ports:
+    - name: http-metrics
+      port: 8080
+      targetPort: 8080
+    - name: telemetry
+      port: 8081
+      targetPort: 8081
+  type: ClusterIP

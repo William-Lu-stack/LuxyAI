@@ -1,0 +1,83 @@
+# ============================================================
+# Advanced Operations ClusterRoleBindings
+#
+# 作用：
+# - 让 k8s-agent-sa 在整个集群范围内执行受控修复、节点隔离、静态 PV 创建和发布治理。
+# - 适合“全局自动化值班模式”：系统生成计划，操作员确认后执行。
+#
+# 安全边界：
+# - 这里没有绑定 cluster-admin。
+# - 实际能执行的动作仍受后端 ACTION_CATALOG、风险门禁、人工确认、
+#   OPS_MUTATION_ENABLED、AUTONOMOUS_OPS_ENABLED 和审计链路约束。
+# - 建议生产环境先设置 AUTONOMOUS_OPS_ENABLED='false'，让每次变更都由人确认。
+#
+# 启用：
+#   kubectl apply -f manifests/rbac.yaml
+#   kubectl apply -f manifests/advanced-ops-clusterrolebindings.yaml
+#
+# 回滚：
+#   kubectl delete -f manifests/advanced-ops-clusterrolebindings.yaml
+# ============================================================
+
+---
+# 核心修复能力：Workload patch/restart/scale、Pod recreate/evict、HPA、PVC、
+# ServiceAccount imagePullSecret、ConfigMap 恢复。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8s-agent-remediator-all-namespaces
+subjects:
+  - kind: ServiceAccount
+    name: k8s-agent-sa
+    namespace: k8s-agent
+roleRef:
+  kind: ClusterRole
+  name: k8s-agent-remediator
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# 节点隔离能力：允许在确认后 cordon/uncordon 发生压力或异常的节点。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8s-agent-node-containment-binding
+subjects:
+  - kind: ServiceAccount
+    name: k8s-agent-sa
+    namespace: k8s-agent
+roleRef:
+  kind: ClusterRole
+  name: k8s-agent-node-containment
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# 静态存储供给能力：允许在人工确认后创建静态 PV，并处理 PVC 创建/修补。
+# 应配合 AUTO_OPS_STATIC_PV_TEMPLATE_JSON 或 NFS 后端参数使用。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8s-agent-storage-provisioner-binding
+subjects:
+  - kind: ServiceAccount
+    name: k8s-agent-sa
+    namespace: k8s-agent
+roleRef:
+  kind: ClusterRole
+  name: k8s-agent-storage-provisioner
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# 发布治理能力：允许平台作为发布入口，创建或修补 Deployment/StatefulSet/DaemonSet、
+# Service 和 PDB。若只希望部分 namespace 可发布，请改用 RoleBinding 示例文件。
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8s-agent-release-manager-all-namespaces
+subjects:
+  - kind: ServiceAccount
+    name: k8s-agent-sa
+    namespace: k8s-agent
+roleRef:
+  kind: ClusterRole
+  name: k8s-agent-release-manager
+  apiGroup: rbac.authorization.k8s.io

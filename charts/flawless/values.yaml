@@ -1,0 +1,105 @@
+nameOverride: ""
+fullnameOverride: ""
+namespaceOverride: ""
+
+image:
+  repository: ghcr.io/your-org/flawless
+  tag: latest
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+api:
+  replicas: 1
+  resources:
+    requests: {cpu: 250m, memory: 384Mi}
+    limits: {cpu: "1", memory: 1Gi}
+
+agents:
+  replicas: 2
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+
+service:
+  type: NodePort
+  apiPort: 8080
+  nodePort: 30080
+
+ingress:
+  enabled: false
+  className: ""
+  host: flawless.example.com
+  annotations: {}
+  tls: []
+
+persistence:
+  enabled: true
+  existingClaim: ""
+  storageClass: standard
+  accessModes: [ReadWriteMany]
+  size: 5Gi
+  volumePermissions:
+    enabled: false
+    runAsUser: 10001
+    runAsGroup: 10001
+
+serviceAccount:
+  create: true
+  name: ""
+
+rbac:
+  create: true
+  # controlled: 读取全集群并允许平台动作目录中的受控写操作；cluster-admin 仅用于隔离测试。
+  mode: controlled
+
+secrets:
+  oauth: k8s-agent-oauth
+  langfuse: k8s-agent-langfuse
+  consoleAuth: flawless-console-auth
+  privateAlgorithms: flawless-custom-algorithms
+  clusterCredentials: flawless-cluster-credentials
+
+admin:
+  enabled: false
+  users: admin
+  trustIdentityHeader: false
+
+config:
+  LLM_AUTH_TYPE: none
+  LLM_MODEL: your-model
+  LLM_API_BASE: ""
+  LLM_VERIFY_SSL: "true"
+  OAUTH_TOKEN_URL: ""
+  OAUTH_VERIFY_SSL: "true"
+  RANCHER_URL: ""
+  RANCHER_VERIFY_SSL: "true"
+  RANCHER_CLUSTER_IDS: all
+  CLUSTER_REGISTRY_PATH: /var/lib/flawless/clusters.db
+  CLUSTER_REGISTRY_FALLBACK_PATH: /tmp/flawless-clusters.db
+  PROMETHEUS_URL: http://k8s-agent-prometheus:9090
+  CMDB_URL: http://k8s-agent-cmdb:8300
+  LANGFUSE_HOST: http://k8s-agent-langfuse:3000
+  OPS_MUTATION_ENABLED: "true"
+  AUTONOMOUS_OPS_ENABLED: "true"
+  AUTO_OPS_MAX_ATTEMPTS: "4"
+  OPS_CONTINUATION_INTERVAL_SECONDS: "30"
+  OPS_STEP_APPROVAL_TIMEOUT_SECONDS: "0"
+  OPS_VERIFY_INITIAL_GRACE_SECONDS: "15"
+  OPS_VERIFY_TIMEOUT_SECONDS: "45"
+  OPS_VERIFY_INTERVAL_SECONDS: "5"
+  OPS_STEPWISE_CONFIRMATION_REQUIRED: "true"
+  SKILL_EXECUTION_REQUIRED: "true"
+  NODE_EXEC_NAMESPACE: flawless-node-exec
+  OPS_LLM_PLANNER_TIMEOUT_SECONDS: "60"
+  OPS_LLM_PLANNER_MAX_TOKENS: "4096"
+  NODE_EXEC_IMAGE: ghcr.io/your-org/flawless-node-exec:1.36
+  ALLOWED_NAMESPACES: all
+  CMDB_ALLOWED_NAMESPACES: all
+  AUTO_OPS_DEFAULT_STORAGE_CLASS: standard
+  CONSOLE_AUTH_REQUIRED: "false"
+  DISABLE_OPENAPI_DOCS: "true"
+  SECURITY_HEADERS_ENABLED: "true"
+  KNOWLEDGE_RUNTIME_WRITE_ENABLED: "true"
+  KNOWLEDGE_EMBEDDING_ENABLED: "true"
+  LOG_LEVEL: INFO

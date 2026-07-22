@@ -1,0 +1,15 @@
+# Copy this RoleBinding into each namespace approved for automated remediation.
+# Keep ALLOWED_NAMESPACES in k8s-agent-config aligned with the same approved list.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k8s-agent-remediator
+  namespace: CHANGE_ME_APPROVED_NAMESPACE
+subjects:
+  - kind: ServiceAccount
+    name: k8s-agent-sa
+    namespace: k8s-agent
+roleRef:
+  kind: ClusterRole
+  name: k8s-agent-remediator
+  apiGroup: rbac.authorization.k8s.io

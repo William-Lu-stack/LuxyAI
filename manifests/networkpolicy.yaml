@@ -1,0 +1,18 @@
+# 可选网络策略：不在应用清单中猜测或限制私有网络 CIDR。
+# NodePort 30080 暴露在集群节点私网地址上，公网隔离由组织路由、防火墙和安全设备负责。
+# NetworkPolicy 仅显式允许本 namespace 内 Pod 的全部入站和出站通信，避免历史
+# default-deny 策略导致控制台、后台服务、CMDB、Prometheus 或模型网关不可达。
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: k8s-agent-allow-all-internal
+  namespace: k8s-agent
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - {}
+  egress:
+    - {}

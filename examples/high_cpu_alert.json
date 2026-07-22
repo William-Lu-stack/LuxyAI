@@ -1,0 +1,18 @@
+{
+  "alerts": [
+    {
+      "labels": {
+        "alertname": "HighCPUUsage",
+        "namespace": "default",
+        "deployment": "checkout-api",
+        "service": "checkout-api",
+        "severity": "P2",
+        "priority": "high"
+      },
+      "annotations": {
+        "summary": "checkout-api CPU usage > 80% for 5 minutes",
+        "description": "Deployment checkout-api is experiencing high CPU load"
+      }
+    }
+  ]
+}

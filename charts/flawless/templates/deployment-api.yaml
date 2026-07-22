@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "flawless.fullname" . }}-api
+  namespace: {{ include "flawless.namespace" . }}
+  labels:
+    {{- include "flawless.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  replicas: {{ .Values.api.replicas }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "flawless.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: control-plane
+  template:
+    metadata:
+      labels:
+        {{- include "flawless.labels" . | nindent 8 }}
+        app.kubernetes.io/component: control-plane
+    spec:
+      serviceAccountName: {{ include "flawless.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- include "flawless.volumePermissionInitContainers" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: api
+          image: {{ include "flawless.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "-m", "uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+          ports:
+            - {name: http, containerPort: 8080}
+          envFrom:
+            {{- include "flawless.envFrom" . | nindent 12 }}
+            - secretRef:
+                name: {{ .Values.secrets.consoleAuth }}
+                optional: true
+          env:
+            - name: CLUSTER_CREDENTIAL_ENCRYPTION_KEY
+              valueFrom: {secretKeyRef: {name: {{ .Values.secrets.clusterCredentials }}, key: fernet-key, optional: true}}
+            - name: LANGFUSE_PUBLIC_KEY
+              valueFrom: {secretKeyRef: {name: {{ .Values.secrets.langfuse }}, key: public-key, optional: true}}
+            - name: LANGFUSE_SECRET_KEY
+              valueFrom: {secretKeyRef: {name: {{ .Values.secrets.langfuse }}, key: secret-key, optional: true}}
+          securityContext:
+            {{- include "flawless.containerSecurity" . | nindent 12 }}
+          volumeMounts:
+            {{- include "flawless.volumeMounts" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.api.resources | nindent 12 }}
+          readinessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 3
+      volumes:
+        - name: runtime-store
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim: {claimName: {{ include "flawless.runtimeClaim" . }}}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: private-algorithms
+          secret: {secretName: {{ .Values.secrets.privateAlgorithms }}, optional: true}
+        - name: runtime-tmp
+          emptyDir: {sizeLimit: 256Mi}

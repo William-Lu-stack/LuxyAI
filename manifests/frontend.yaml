@@ -1,0 +1,234 @@
+# ============================================================
+# Control Plane API + Web Service — SRE 智能运维控制台
+#
+# 前置: 只构建一个后端一体化镜像，镜像内已经包含 frontend/dist
+#   docker build --target backend-runtime -t <repo>/flawless:<tag> .
+#   docker push <repo>/flawless:<tag>
+#
+# 部署:
+#   kubectl apply -f manifests/rbac.yaml
+#   kubectl apply -f manifests/deployment.yaml   # 提供统一 ConfigMap: k8s-agent-config
+#   kubectl apply -f manifests/frontend.yaml
+#
+# 如果要拆成独立 Nginx Web 镜像，才需要另行构建 frontend-runtime。
+# 当前清单默认单镜像部署，不再引用 k8s-agent-web。
+# ============================================================
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: flawless-runtime-store
+  namespace: k8s-agent
+  labels:
+    app: flawless-runtime-store
+    component: runtime-store
+spec:
+  storageClassName: standard
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: k8s-agent-api
+  namespace: k8s-agent
+  labels:
+    app: k8s-agent-api
+    component: backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: k8s-agent-api
+  template:
+    metadata:
+      labels:
+        app: k8s-agent-api
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: m.daocloud.io/ghcr.io/your-org/flawless:3.2.2
+          imagePullPolicy: Always
+          command:
+            - python
+            - -m
+            - uvicorn
+            - backend.app.main:app
+            - --host
+            - 0.0.0.0
+            - --port
+            - "8080"
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                # 统一使用 deployment.yaml 中的 k8s-agent-config，避免 CMDB/Prometheus 配置两处维护。
+                name: k8s-agent-config
+            - secretRef:
+                name: k8s-agent-oauth
+                optional: true
+            - secretRef:
+                # 仅包含 CONSOLE_BASIC_AUTH_USERNAME/PASSWORD；由组织 Secret 管理系统创建。
+                name: flawless-console-auth
+                optional: true
+          env:
+            - name: FRONTEND_PORT
+              value: "8080"
+            - name: FLAWLESS_CUSTOM_ALGORITHM_PATH
+              value: /var/lib/flawless-custom/aiops_algorithms_custom.py
+            - name: MODEL_PROFILES_STORE
+              value: /var/lib/flawless/model-profiles.json
+            - name: KNOWLEDGE_STORE_PATH
+              value: /var/lib/flawless/knowledge-base.json
+            - name: OPS_SKILL_ROOT
+              value: /var/lib/flawless/ops-skills
+            - name: OPS_SKILL_STORE_PATH
+              value: /var/lib/flawless/ops-skills.json
+            - name: RELIABILITY_STORE_PATH
+              value: /var/lib/flawless/reliability-state.json
+            - name: RELIABILITY_STORE_FALLBACK_PATH
+              value: /tmp/flawless/reliability-state.json
+            - name: RELIABILITY_STORE_EMERGENCY_PATH
+              value: /dev/shm/flawless/reliability-state.json
+            - name: LANGFUSE_PUBLIC_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: k8s-agent-langfuse
+                  key: public-key
+                  optional: true
+            - name: LANGFUSE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: k8s-agent-langfuse
+                  key: secret-key
+                  optional: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 250m
+              memory: 384Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          startupProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 36
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            timeoutSeconds: 2
+            failureThreshold: 4
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 6
+          volumeMounts:
+            - name: runtime-store
+              mountPath: /var/lib/flawless
+            - name: runtime-store
+              mountPath: /var/lib/flawless
+            - name: private-algorithms
+              mountPath: /var/lib/flawless-custom
+              readOnly: true
+            - name: runtime-tmp
+              mountPath: /tmp
+      volumes:
+        - name: runtime-store
+          persistentVolumeClaim:
+            claimName: flawless-runtime-store
+        - name: private-algorithms
+          secret:
+            secretName: flawless-custom-algorithms
+            optional: true
+        - name: runtime-tmp
+          emptyDir:
+            sizeLimit: 64Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: k8s-agent-api
+  namespace: k8s-agent
+  labels:
+    app: k8s-agent-api
+spec:
+  selector:
+    app: k8s-agent-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+  type: ClusterIP
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: k8s-agent-frontend
+  namespace: k8s-agent
+  labels:
+    app: k8s-agent-frontend
+spec:
+  selector:
+    app: k8s-agent-api
+  type: NodePort
+  externalTrafficPolicy: Cluster
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      nodePort: 30080
+
+# 生产环境通过组织 Ingress/Gateway 暴露，并强制 TLS + OIDC；不默认创建明文 NodePort。
+# 可选: Ingress（根据集群 Ingress Controller 调整）
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: k8s-agent-frontend
+#   namespace: k8s-agent
+#   annotations:
+#     nginx.ingress.kubernetes.io/rewrite-target: /
+# spec:
+#   rules:
+#     - host: sre-console.your-cluster.local
+#       http:
+#         paths:
+#           - path: /
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: k8s-agent-frontend
+#                 port:
+#                   number: 8080

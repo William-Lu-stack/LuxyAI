@@ -1,0 +1,86 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "flawless.fullname" . }}-agents
+  namespace: {{ include "flawless.namespace" . }}
+  labels:
+    {{- include "flawless.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agents
+spec:
+  replicas: {{ .Values.agents.replicas }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: {maxUnavailable: 1, maxSurge: 1}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "flawless.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: agents
+  template:
+    metadata:
+      labels:
+        {{- include "flawless.labels" . | nindent 8 }}
+        app.kubernetes.io/component: agents
+    spec:
+      serviceAccountName: {{ include "flawless.serviceAccountName" . }}
+      automountServiceAccountToken: true
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- include "flawless.volumePermissionInitContainers" . | nindent 6 }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        {{- $agents := list
+          (dict "name" "mcp-server" "module" "mcp_servers.mcp_http_server:app" "port" 8105)
+          (dict "name" "observability-agent" "module" "agents.observability_agent:app" "port" 8100)
+          (dict "name" "healing-agent" "module" "agents.healing_agent:app" "port" 8101)
+          (dict "name" "incident-agent" "module" "agents.incident_agent:app" "port" 8102)
+          (dict "name" "postmortem-agent" "module" "agents.postmortem_agent:app" "port" 8103)
+          (dict "name" "openwebui-adapter" "module" "openwebui.openwebui_adapter:app" "port" 8200)
+        }}
+        {{- range $agent := $agents }}
+        - name: {{ $agent.name }}
+          image: {{ include "flawless.image" $ | quote }}
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          command: ["python", "-m", "uvicorn", {{ $agent.module | quote }}, "--host", "0.0.0.0", "--port", {{ $agent.port | quote }}]
+          ports:
+            - {name: {{ $agent.name | trunc 15 | trimSuffix "-" }}, containerPort: {{ $agent.port }}}
+          envFrom:
+            {{- include "flawless.envFrom" $ | nindent 12 }}
+          securityContext:
+            {{- include "flawless.containerSecurity" $ | nindent 12 }}
+          volumeMounts:
+            {{- include "flawless.volumeMounts" $ | nindent 12 }}
+          resources:
+            {{- toYaml $.Values.agents.resources | nindent 12 }}
+          {{- if eq $agent.name "postmortem-agent" }}
+          readinessProbe:
+            httpGet: {path: /health, port: {{ $agent.port }}}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet: {path: /health, port: {{ $agent.port }}}
+            initialDelaySeconds: 20
+            periodSeconds: 20
+            timeoutSeconds: 3
+          {{- end }}
+        {{- end }}
+      volumes:
+        - name: runtime-store
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim: {claimName: {{ include "flawless.runtimeClaim" . }}}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: private-algorithms
+          secret: {secretName: {{ .Values.secrets.privateAlgorithms }}, optional: true}
+        - name: runtime-tmp
+          emptyDir: {sizeLimit: 256Mi}

@@ -1,0 +1,43 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "flawless.fullname" . }}
+  namespace: {{ include "flawless.namespace" . }}
+  labels:
+    {{- include "flawless.labels" . | nindent 4 }}
+    app.kubernetes.io/component: control-plane
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    app.kubernetes.io/name: {{ include "flawless.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: control-plane
+  ports:
+    - name: http
+      port: {{ .Values.service.apiPort }}
+      targetPort: http
+      {{- if and (eq .Values.service.type "NodePort") .Values.service.nodePort }}
+      nodePort: {{ .Values.service.nodePort }}
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "flawless.fullname" . }}-agents
+  namespace: {{ include "flawless.namespace" . }}
+  labels:
+    {{- include "flawless.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agents
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ include "flawless.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: agents
+  ports:
+    - {name: observability, port: 8100, targetPort: 8100}
+    - {name: healing, port: 8101, targetPort: 8101}
+    - {name: incident, port: 8102, targetPort: 8102}
+    - {name: postmortem, port: 8103, targetPort: 8103}
+    - {name: mcp, port: 8105, targetPort: 8105}
+    - {name: adapter, port: 8200, targetPort: 8200}

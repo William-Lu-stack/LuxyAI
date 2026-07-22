@@ -1,0 +1,60 @@
+name: flawless
+
+services:
+  flawless:
+    image: ${FLAWLESS_IMAGE:-flawless-local:latest}
+    build:
+      context: .
+      target: backend-runtime
+      args:
+        NODE_IMAGE: ${FLAWLESS_NODE_IMAGE:-node:24-slim}
+        PYTHON_IMAGE: ${FLAWLESS_PYTHON_IMAGE:-python:3.13-slim}
+        NGINX_IMAGE: ${FLAWLESS_NGINX_IMAGE:-nginxinc/nginx-unprivileged:stable-alpine3.23@sha256:b3f2436575bd5be7386518084d842dac414ab4962712afa31e99e0942a56e3b2}
+        NPM_REGISTRY: ${FLAWLESS_NPM_REGISTRY:-https://registry.npmjs.org}
+        PIP_INDEX_URL: ${FLAWLESS_PIP_INDEX_URL:-https://pypi.org/simple}
+        PIP_EXTRA_INDEX_URL: ${FLAWLESS_PIP_EXTRA_INDEX_URL:-}
+        PIP_TRUSTED_HOST: ${FLAWLESS_PIP_TRUSTED_HOST:-}
+        DEBIAN_MIRROR: ${FLAWLESS_DEBIAN_MIRROR:-http://deb.debian.org/debian}
+    env_file:
+      - .env
+    environment:
+      ADAPTER_URL: http://127.0.0.1:8200
+      CMDB_URL: http://127.0.0.1:8300
+      EFFECTIVENESS_STORE_FALLBACK_PATH: /var/lib/flawless/effectiveness-state.fallback.json
+      EFFECTIVENESS_STORE_PATH: /var/lib/flawless/effectiveness-state.json
+      EMBEDDING_API_BASE: ${FLAWLESS_DOCKER_EMBEDDING_API_BASE:-http://host.docker.internal:11434/v1}
+      HEALING_AGENT_URL: http://127.0.0.1:8101/a2a/tasks
+      INCIDENT_AGENT_URL: http://127.0.0.1:8102/a2a/tasks
+      KNOWLEDGE_STORE_PATH: /var/lib/flawless/knowledge-base.json
+      LLM_API_BASE: ${FLAWLESS_DOCKER_LLM_API_BASE:-http://host.docker.internal:11434/v1}
+      MCP_SERVER_URL: http://127.0.0.1:8105/mcp
+      MODEL_PROFILES_STORE: /var/lib/flawless/model-profiles.json
+      OBSERVABILITY_URL: http://127.0.0.1:8100
+      OPS_SKILL_ROOT: /var/lib/flawless/ops-skills
+      OPS_SKILL_STORE_PATH: /var/lib/flawless/ops-skills.json
+      POSTMORTEM_AGENT_URL: http://127.0.0.1:8103/a2a/tasks
+      RELIABILITY_STORE_FALLBACK_PATH: /var/lib/flawless/reliability-state.fallback.json
+      RELIABILITY_STORE_PATH: /var/lib/flawless/reliability-state.json
+    extra_hosts:
+      - host.docker.internal:host-gateway
+    ports:
+      - 127.0.0.1:${FLAWLESS_PORT:-8080}:8080
+    volumes:
+      - flawless-data:/var/lib/flawless
+    command:
+      - python
+      - scripts/run_local_stack.py
+      - --host
+      - 0.0.0.0
+      - --api-port
+      - "8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:8080/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
+    restart: unless-stopped
+
+volumes:
+  flawless-data:

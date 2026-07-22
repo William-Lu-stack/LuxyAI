@@ -1,0 +1,30 @@
+# Replace the host, TLS secret and auth URL with organization-approved values before applying.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: k8s-agent-frontend
+  namespace: k8s-agent
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/auth-url: "https://sre.example.com/oauth2/auth"
+    nginx.ingress.kubernetes.io/auth-signin: "https://sre.example.com/oauth2/start?rd=$escaped_request_uri"
+    nginx.ingress.kubernetes.io/auth-response-headers: "X-Auth-Request-User,X-Auth-Request-Email,X-Auth-Request-Groups"
+    nginx.ingress.kubernetes.io/proxy-body-size: "2m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "180"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [sre.example.com]
+      secretName: sre-console-tls
+  rules:
+    - host: sre.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: k8s-agent-frontend
+                port:
+                  number: 8080

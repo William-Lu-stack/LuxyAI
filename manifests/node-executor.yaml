@@ -1,0 +1,40 @@
+# Optional node-host execution boundary.
+#
+# Applying this file permits the Flawless service account to create a short-lived,
+# privileged executor Pod only in this dedicated namespace. The backend still
+# requires a matched Skill, high-risk confirmation and per-step human approval.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: flawless-node-exec
+  labels:
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: privileged
+    pod-security.kubernetes.io/warn: privileged
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: flawless-node-executor-controller
+  namespace: flawless-node-exec
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [create, get, list, watch, delete]
+  - apiGroups: [""]
+    resources: [pods/log]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: flawless-node-executor-controller
+  namespace: flawless-node-exec
+subjects:
+  - kind: ServiceAccount
+    name: k8s-agent-sa
+    namespace: k8s-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: flawless-node-executor-controller

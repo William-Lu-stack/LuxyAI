@@ -1,0 +1,18 @@
+{
+  "alerts": [
+    {
+      "labels": {
+        "alertname": "KubePodCrashLooping",
+        "namespace": "default",
+        "deployment": "your-workload",
+        "service": "your-workload",
+        "severity": "P1",
+        "priority": "critical"
+      },
+      "annotations": {
+        "summary": "Pod is crash looping",
+        "description": "your-workload pod restarted more than 5 times"
+      }
+    }
+  ]
+}

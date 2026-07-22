@@ -1,0 +1,597 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: k8s-agent-config
+  namespace: k8s-agent
+data:
+  APP_BUILD_VERSION: '3.2.2'
+  OAUTH_TOKEN_URL: ''
+  LLM_GATEWAY_BASE: ''
+  LLM_API_BASE: http://ollama.default.svc.cluster.local:11434/v1
+  LLM_MODEL: qwen2.5:7b
+  LLM_PROVIDER: openai-compatible
+  LLM_PROFILE_ID: primary
+  LLM_AUTH_TYPE: none
+  MODEL_ROUTING_STRATEGY: primary-with-shadow-eval
+  MODEL_SHADOW_EVAL_ENABLED: 'false'
+  MODEL_PROFILE_RUNTIME_WRITE_ENABLED: 'true'
+  MODEL_PROFILES_STORE: /var/lib/flawless/model-profiles.json
+  RELIABILITY_STORE_PATH: /var/lib/flawless/reliability-state.json
+  RELIABILITY_STORE_FALLBACK_PATH: /tmp/flawless/reliability-state.json
+  RELIABILITY_STORE_EMERGENCY_PATH: /dev/shm/flawless/reliability-state.json
+  EFFECTIVENESS_STORE_PATH: /var/lib/flawless/effectiveness-state.json
+  EFFECTIVENESS_STORE_FALLBACK_PATH: /tmp/flawless-effectiveness-state.json
+  KNOWLEDGE_RUNTIME_WRITE_ENABLED: 'true'
+  KNOWLEDGE_STORE_PATH: /var/lib/flawless/knowledge-base.json
+  KNOWLEDGE_EMBEDDING_ENABLED: 'true'
+  KNOWLEDGE_MAX_UPLOAD_BYTES: '20971520'
+  MODEL_PROFILES_JSON: '[{"id":"primary","provider":"openai-compatible","model":"qwen2.5:7b","base_url":"http://ollama.default.svc.cluster.local:11434/v1","auth_type":"none","role":"primary","weight":100,"max_tokens":4096,"verify_ssl":true}]'
+  EMBEDDING_GATEWAY_BASE: http://ollama.default.svc.cluster.local:11434/v1
+  EMBEDDING_MODEL: nomic-embed-text
+  # 云/基础设施适配器只放非敏感声明；AK/SK/Token 必须放 Secret。
+  CLOUD_ADAPTERS_JSON: '[{"id":"generic-storage","provider":"csi-storage","display_name":"Generic CSI Storage","enabled":false,"capabilities":["storage","csi","pv-pvc","capacity","latency","topology"],"auth_mode":"secret-ref","regions":["example-region"],"inventory_scope":"storage-pool/cluster","safety_boundary":"read-only discovery + PVC/PV change approval"},{"id":"virtualization-platform","provider":"virtualization","display_name":"Virtualization Platform","enabled":false,"capabilities":["hci","virtualization","network","storage","security","topology"],"auth_mode":"secret-ref","regions":["example-dc"],"inventory_scope":"tenant/resource-pool","safety_boundary":"tenant token + high-risk approval"}]'
+  # Kubernetes 之外的全栈资源接入。这里只放资源描述和只读探测地址，敏感凭据必须放 Secret 或外部执行器。
+  # 示例：[{"id":"prod-mysql-01","type":"database","engine":"mysql","name":"生产订单 MySQL","host":"mysql.example","port":3306,"business_service":"order","criticality":"high","metrics":{"connections_percent":91}}]
+  INFRASTRUCTURE_RESOURCES_JSON: '[]'
+  DATABASE_TARGETS_JSON: '[]'
+  VM_TARGETS_JSON: '[]'
+  MIDDLEWARE_TARGETS_JSON: '[]'
+  STORAGE_TARGETS_JSON: '[]'
+  INFRASTRUCTURE_VERIFY_SSL: 'true'
+  INFRASTRUCTURE_LLM_PLANNER_ENABLED: 'true'
+  # DB/VM/存储/云平台真实变更必须交给企业受控执行器，平台只提交结构化计划并保留审批审计。
+  INFRASTRUCTURE_ACTION_WEBHOOK_URL: ''
+  CSI_STORAGE_ENDPOINT: ''
+  VIRTUALIZATION_PLATFORM_ENDPOINT: ''
+  LANGFUSE_ENABLED: 'false'
+  LANGFUSE_HOST: ''
+  CMDB_URL: http://k8s-agent-cmdb.k8s-agent.svc.cluster.local:8300
+  PROMETHEUS_URL: http://k8s-agent-prometheus.k8s-agent.svc.cluster.local:9090
+  # 可接组织已有 Grafana 可观测栈；留空时界面明确显示“未配置”，不会生成模拟数据。
+  LOKI_URL: http://k8s-agent-loki.k8s-agent.svc.cluster.local:3100
+  TEMPO_URL: http://k8s-agent-tempo.k8s-agent.svc.cluster.local:3200
+  GRAFANA_URL: http://k8s-agent-grafana.k8s-agent.svc.cluster.local:3000
+  # 外部数据流：不配置时使用 K8s/CMDB 静态推断；配置后接入 Hubble/Kiali/Beyla/自研流量服务的真实网络流。
+  # 主应用不运行特权抓包进程；如集群没有现成 eBPF 服务，可部署 manifests/ebpf-beyla.yaml。
+  # CNI_PLUGIN_MODE 可选 auto/flannel/canal/calico/cilium；flannel/canal/calico 均不要求本应用容器 privileged。
+  CNI_PLUGIN_MODE: auto
+  NETWORK_PLUGIN_MODE: auto
+  EBPF_FLOW_PROVIDER: auto
+  EBPF_FLOW_ENABLED: 'true'
+  EBPF_FLOW_URL: ''
+  EBPF_FLOW_TOKEN: ''
+  EBPF_FLOW_VERIFY_SSL: 'true'
+  EBPF_TOPOLOGY_FUSION_ENABLED: 'true'
+  EBPF_TOPOLOGY_WINDOW: 30m
+  # 从 0 部署 eBPF 时，Beyla 会把 network_flow 输出到日志；Alloy 收集到 Loki 后由后端解析成真实数据流。
+  BEYLA_LOKI_FLOW_ENABLED: 'true'
+  BEYLA_LOKI_NAMESPACE: flawless-ebpf
+  BEYLA_LOKI_POD_SELECTOR: flawless-beyla.*
+  BEYLA_LOKI_FLOW_LIMIT: '500'
+  BEYLA_FLOW_QUERY_WINDOW: 5m
+  # flannel 本身不原生输出 flow API；这里接企业 eBPF Collector、DeepFlow/Pixie/Tetragon 等脱敏后的 HTTP API。
+  FLANNEL_EBPF_FLOW_URL: ''
+  FLANNEL_EBPF_FLOW_TOKEN: ''
+  FLANNEL_EBPF_FLOW_VERIFY_SSL: 'true'
+  # canal 通常是 flannel 数据面 + Calico policy；可接 canal 专用 Collector 或 Calico Flow/Goldmane。
+  CANAL_EBPF_FLOW_URL: ''
+  CANAL_EBPF_FLOW_TOKEN: ''
+  CANAL_EBPF_FLOW_VERIFY_SSL: 'true'
+  # calico 可接 Calico Enterprise/Cloud Flow Logs、Whisker/Goldmane API 或 Calico eBPF dataplane 的企业导出 API。
+  CALICO_FLOW_URL: ''
+  CALICO_GOLDMANE_FLOW_URL: ''
+  CALICO_FLOW_TOKEN: ''
+  CALICO_FLOW_VERIFY_SSL: 'true'
+  HUBBLE_FLOW_URL: ''
+  HUBBLE_RELAY_HTTP_URL: ''
+  HUBBLE_FLOW_TOKEN: ''
+  FLOW_OBSERVATION_URL: ''
+  FLOW_OBSERVATION_TOKEN: ''
+  FLOW_OBSERVATION_VERIFY_SSL: 'true'
+  KIALI_FLOW_URL: ''
+  KIALI_TOKEN: ''
+  KIALI_VERIFY_SSL: 'true'
+  CLUSTER_INTERNAL_DOMAINS: svc,svc.cluster.local,cluster.local
+  EXTERNAL_FLOW_CLUSTER_DOMAINS_JSON: '[]'
+  CACHE_TTL_EXTERNAL_TRAFFIC: '20'
+  PROMETHEUS_CLUSTER_LABEL: cluster
+  PROMETHEUS_CLUSTER_LABELS: cluster,cluster_id,rancher_cluster_id,cluster_name
+  RANCHER_URL: ''
+  RANCHER_VERIFY_SSL: 'true'
+  RANCHER_CLUSTER_IDS: all
+  CLUSTER_REGISTRY_PATH: /var/lib/flawless/clusters.db
+  CLUSTER_REGISTRY_FALLBACK_PATH: /tmp/flawless-clusters.db
+  CORS_ALLOW_ORIGINS: ''
+  # 当前通过私有网络 NodePort 访问，不要求浏览器登录；生产接入组织 OIDC 后再改为 true。
+  CONSOLE_AUTH_REQUIRED: 'false'
+  CONSOLE_TRUSTED_IDENTITY_HEADER: x-auth-request-user
+  # 管理员配置模式默认关闭。开启后只有 Secret 中的 Basic Auth 管理员可以写入模型、知识库和 Skill。
+  CONSOLE_ADMIN_MODE: 'false'
+  CONSOLE_ADMIN_USERS: admin
+  CONSOLE_ADMIN_TRUSTED_IDENTITY: 'false'
+  DISABLE_OPENAPI_DOCS: 'true'
+  SECURITY_HEADERS_ENABLED: 'true'
+  MAX_REQUEST_BODY_BYTES: '2097152'
+  # CMDB 拓扑范围与修复白名单必须分离；拓扑默认读取全部 namespace，变更仍受 ALLOWED_NAMESPACES 限制。
+  CMDB_ALLOWED_NAMESPACES: all
+  MAX_PATCH_REPLICAS: '20'
+  DEFAULT_IMAGE_PULL_SECRET: ''
+  AUTO_OPS_DEFAULT_MEMORY_LIMIT: 1Gi
+  AUTO_OPS_MEMORY_GROWTH_FACTOR: '1.5'
+  AUTO_OPS_MAX_MEMORY_GI: '8'
+  AUTO_OPS_DEFAULT_PVC_SIZE: '10Gi'
+  AUTO_OPS_DEFAULT_PVC_ACCESS_MODE: ReadWriteOnce
+  # 自动化运维创建缺失 PVC 时默认使用组织 NAS StorageClass；高风险创建仍需人工确认。
+  AUTO_OPS_DEFAULT_STORAGE_CLASS: standard
+  # PVC Pending 且确需静态供卷时，由存储管理员填写已批准的 NFS 后端。
+  AUTO_OPS_STATIC_PV_TEMPLATE_JSON: '{}'
+  AUTO_OPS_STATIC_PV_NFS_SERVER: ''
+  AUTO_OPS_STATIC_PV_NFS_BASE_PATH: ''
+  AUTO_OPS_STATIC_PV_RECLAIM_POLICY: Retain
+  # 缺失 ConfigMap 只能从这里的批准模板恢复，严禁让模型自行编造配置值。
+  # 示例：{"prod/app-config":{"data":{"APP_MODE":"prod"}}}
+  AUTO_OPS_CONFIGMAP_TEMPLATES_JSON: '{}'
+  # Skill 只能引用这里登记的企业批准脚本 ID，不保存脚本正文。
+  # 每个 Skill 最终保存为独立 Agent Skills 标准目录，并由 frontend.yaml 的 PVC 持久化。
+  OPS_SKILL_ROOT: /var/lib/flawless/ops-skills
+  # 仅用于自动迁移旧版本单文件注册表；迁移完成后以 OPS_SKILL_ROOT 为事实来源。
+  OPS_SKILL_STORE_PATH: /var/lib/flawless/ops-skills.json
+  OPS_JOB_STORE_PATH: /var/lib/flawless/ops-jobs.json
+  # 示例：[{"id":"inspect-pvc-permission","name":"PVC 目录权限检查","description":"只读检查挂载目录属主和权限","risk":"medium","runner":"enterprise-script-runner","allowed_targets":["Pod","PVC"],"required_evidence":["previous_logs","storage_chain"]}]
+  OPS_APPROVED_SCRIPTS_JSON: '[]'
+  OUTBOUND_VERIFY_SSL: 'true'
+  # 内部模型/Embedding 网关当前使用容器不信任的企业证书，等价于原 curl -k。
+  # 后续挂载组织 CA bundle 后应恢复为 true。
+  LLM_VERIFY_SSL: 'false'
+  OAUTH_VERIFY_SSL: 'true'
+  LOCAL_CLUSTER_NAME: local-cluster
+  MIDDLEWARE_CLUSTER_NAME: middleware-cluster
+  LOGGING_KAFKA_NAMESPACE: middleware
+  LOGGING_KAFKA_SERVICE: kafka
+  ELK_NAMESPACE: logging
+  ELK_SERVICE: elk
+  ADAPTER_URL: http://flawless.k8s-agent.svc.cluster.local:8200
+  OBSERVABILITY_URL: http://flawless.k8s-agent.svc.cluster.local:8100
+  HEALING_AGENT_URL: http://flawless.k8s-agent.svc.cluster.local:8101/a2a/tasks
+  INCIDENT_AGENT_URL: http://flawless.k8s-agent.svc.cluster.local:8102/a2a/tasks
+  POSTMORTEM_AGENT_URL: http://flawless.k8s-agent.svc.cluster.local:8103/a2a/tasks
+  OBSERVABILITY_AGENT_URL: http://flawless.k8s-agent.svc.cluster.local:8100
+  MCP_SERVER_URL: http://flawless.k8s-agent.svc.cluster.local:8105/mcp
+  ALLOWED_NAMESPACES: k8s-agent
+  AUTO_HEALING_ENABLED: 'false'
+  OPS_MUTATION_ENABLED: 'true'
+  AUTONOMOUS_OPS_ENABLED: 'true'
+  SKILL_EXECUTION_REQUIRED: 'true'
+  NODE_EXEC_NAMESPACE: flawless-node-exec
+  OPS_LLM_PLANNER_TIMEOUT_SECONDS: '60'
+  OPS_LLM_PLANNER_MAX_TOKENS: '4096'
+  NODE_EXEC_IMAGE: m.daocloud.io/ghcr.io/your-org/flawless-node-exec:1.36
+  AUTO_OPS_MAX_ATTEMPTS: '4'
+  OPS_CONTINUATION_INTERVAL_SECONDS: '30'
+  OPS_STEP_APPROVAL_TIMEOUT_SECONDS: '0'
+  OPS_MAX_CONCURRENT_JOBS: '4'
+  OPS_VERIFY_TIMEOUT_SECONDS: '45'
+  OPS_VERIFY_INTERVAL_SECONDS: '5'
+  OPS_EVIDENCE_TIMEOUT_SECONDS: '70'
+  OPS_STEP_TIMEOUT_SECONDS: '35'
+  OPS_CHANGE_TIMEOUT_SECONDS: '45'
+  OPS_HEARTBEAT_SECONDS: '5'
+  SLO_DEFAULT_TARGET_PERCENT: '99.9'
+  SLO_DEFAULT_WINDOW_DAYS: '30'
+  WRITE_RATE_LIMIT_PER_MINUTE: '120'
+  CACHE_TTL_RANCHER_INVENTORY: '15'
+  INSPECTION_MAX_EVENT_FETCHES_PER_CLUSTER: '40'
+  # 巡检先做 Skill 语义匹配，再用一次受约束模型批量复核；失败时自动退回语义匹配。
+  INSPECTION_SKILL_ROUTER_ENABLED: 'true'
+  INSPECTION_SKILL_ROUTER_TIMEOUT_SECONDS: '18'
+  LLM_CONNECT_TIMEOUT_SECONDS: '5'
+  LLM_READ_TIMEOUT_SECONDS: '45'
+  LLM_DIAGNOSIS_MAX_TOKENS: '1400'
+  LLM_HTTP_MAX_CONNECTIONS: '64'
+  LLM_HTTP_KEEPALIVE_CONNECTIONS: '16'
+  LLM_HTTP_KEEPALIVE_SECONDS: '30'
+  HEALING_SCALE_DELTA: '1'
+  MAX_INFLIGHT_REQUESTS: '256'
+  REQUEST_BULKHEAD_TIMEOUT_SECONDS: '1.5'
+  MAX_OUTBOUND_CONCURRENCY: '96'
+  AI_INSPECTION_INTERVAL_MINUTES: '30'
+  LLM_ESTIMATED_TOKENS_PER_CALL: '1800'
+  LLM_ESTIMATED_TOKENS_PER_INSPECTION: '3600'
+  OUTBOUND_BULKHEAD_TIMEOUT_SECONDS: '2.0'
+  HTTP_MAX_CONNECTIONS: '256'
+  HTTP_MAX_KEEPALIVE_CONNECTIONS: '64'
+  CACHE_TTL_RANCHER_CLUSTERS: '45'
+  CACHE_MAX_ITEMS: '256'
+  IN_MEMORY_STORE_LIMIT: '1000'
+  PYTHONDONTWRITEBYTECODE: '1'
+  PYTHONUNBUFFERED: '1'
+  HOME: /tmp
+  XDG_CACHE_HOME: /tmp/.cache
+  MPLCONFIGDIR: /tmp/matplotlib
+  TOKENIZERS_PARALLELISM: 'false'
+  PLATFORM_SELF_HEAL_ENABLED: 'false'
+  PLATFORM_SELF_HEAL_COOLDOWN_SECONDS: '300'
+  PLATFORM_NAMESPACE: k8s-agent
+  PLATFORM_WORKLOAD_NAME: flawless
+  PLATFORM_CORE_SERVICES: observability,healing,incident,postmortem,adapter,mcp
+  FLAWLESS_CUSTOM_ALGORITHM_PATH: /var/lib/flawless-custom/aiops_algorithms_custom.py
+  LOG_LEVEL: INFO
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: flawless-runtime-store
+  namespace: k8s-agent
+  labels:
+    app: flawless-runtime-store
+    component: runtime-store
+spec:
+  storageClassName: standard
+  accessModes:
+  - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: flawless
+  namespace: k8s-agent
+spec:
+  # OpsJob approval events use a single active worker lease. Keep this
+  # compatibility deployment at one replica until an external distributed
+  # execution coordinator is configured.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: flawless
+  template:
+    metadata:
+      labels:
+        app: flawless
+    spec:
+      serviceAccountName: k8s-agent-sa
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+      - name: mcp-server
+        image: m.daocloud.io/ghcr.io/your-org/flawless:3.2.2
+        imagePullPolicy: Always
+        command:
+        - uvicorn
+        - mcp_servers.mcp_http_server:app
+        - --host
+        - 0.0.0.0
+        - --port
+        - '8105'
+        ports:
+        - containerPort: 8105
+        envFrom:
+        - configMapRef:
+            name: k8s-agent-config
+        - secretRef:
+            name: k8s-agent-oauth
+            optional: true
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: runtime-store
+          mountPath: /var/lib/flawless
+        - name: runtime-store
+          mountPath: /var/lib/flawless
+        - name: private-algorithms
+          mountPath: /var/lib/flawless-custom
+          readOnly: true
+        - name: runtime-tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+      - name: observability-agent
+        image: m.daocloud.io/ghcr.io/your-org/flawless:3.2.2
+        imagePullPolicy: Always
+        command:
+        - uvicorn
+        - agents.observability_agent:app
+        - --host
+        - 0.0.0.0
+        - --port
+        - '8100'
+        ports:
+        - containerPort: 8100
+        envFrom:
+        - configMapRef:
+            name: k8s-agent-config
+        - secretRef:
+            name: k8s-agent-oauth
+            optional: true
+        env:
+        - name: CLUSTER_CREDENTIAL_ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: flawless-cluster-credentials
+              key: fernet-key
+              optional: true
+        - name: LANGFUSE_PUBLIC_KEY
+          valueFrom:
+            secretKeyRef:
+              name: k8s-agent-langfuse
+              key: public-key
+              optional: true
+        - name: LANGFUSE_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: k8s-agent-langfuse
+              key: secret-key
+              optional: true
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: runtime-store
+          mountPath: /var/lib/flawless
+        - name: runtime-store
+          mountPath: /var/lib/flawless
+        - name: private-algorithms
+          mountPath: /var/lib/flawless-custom
+          readOnly: true
+        - name: runtime-tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            cpu: 1
+            memory: 1Gi
+      - name: healing-agent
+        image: m.daocloud.io/ghcr.io/your-org/flawless:3.2.2
+        imagePullPolicy: Always
+        command:
+        - uvicorn
+        - agents.healing_agent:app
+        - --host
+        - 0.0.0.0
+        - --port
+        - '8101'
+        ports:
+        - containerPort: 8101
+        envFrom:
+        - configMapRef:
+            name: k8s-agent-config
+        - secretRef:
+            name: k8s-agent-oauth
+            optional: true
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: runtime-store
+          mountPath: /var/lib/flawless
+        - name: runtime-store
+          mountPath: /var/lib/flawless
+        - name: private-algorithms
+          mountPath: /var/lib/flawless-custom
+          readOnly: true
+        - name: runtime-tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+      - name: incident-agent
+        image: m.daocloud.io/ghcr.io/your-org/flawless:3.2.2
+        imagePullPolicy: Always
+        command:
+        - uvicorn
+        - agents.incident_agent:app
+        - --host
+        - 0.0.0.0
+        - --port
+        - '8102'
+        ports:
+        - containerPort: 8102
+        envFrom:
+        - configMapRef:
+            name: k8s-agent-config
+        - secretRef:
+            name: k8s-agent-oauth
+            optional: true
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: runtime-store
+          mountPath: /var/lib/flawless
+        - name: runtime-store
+          mountPath: /var/lib/flawless
+        - name: private-algorithms
+          mountPath: /var/lib/flawless-custom
+          readOnly: true
+        - name: runtime-tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+      - name: postmortem-agent
+        image: m.daocloud.io/ghcr.io/your-org/flawless:3.2.2
+        imagePullPolicy: Always
+        command:
+        - sh
+        - -c
+        args:
+        - |
+          python -c "from agents.postmortem_agent import app; print('POSTMORTEM_IMPORT_OK')" &&
+          exec uvicorn agents.postmortem_agent:app --host 0.0.0.0 --port 8103
+        ports:
+        - containerPort: 8103
+        envFrom:
+        - configMapRef:
+            name: k8s-agent-config
+        - secretRef:
+            name: k8s-agent-oauth
+            optional: true
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: runtime-store
+          mountPath: /var/lib/flawless
+        - name: runtime-store
+          mountPath: /var/lib/flawless
+        - name: private-algorithms
+          mountPath: /var/lib/flawless-custom
+          readOnly: true
+        - name: runtime-tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8103
+          initialDelaySeconds: 10
+          periodSeconds: 20
+          timeoutSeconds: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8103
+          initialDelaySeconds: 5
+          periodSeconds: 10
+          timeoutSeconds: 3
+      - name: openwebui-adapter
+        image: m.daocloud.io/ghcr.io/your-org/flawless:3.2.2
+        imagePullPolicy: Always
+        command:
+        - uvicorn
+        - openwebui.openwebui_adapter:app
+        - --host
+        - 0.0.0.0
+        - --port
+        - '8200'
+        ports:
+        - containerPort: 8200
+        envFrom:
+        - configMapRef:
+            name: k8s-agent-config
+        - secretRef:
+            name: k8s-agent-oauth
+            optional: true
+        env:
+        - name: CLUSTER_CREDENTIAL_ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: flawless-cluster-credentials
+              key: fernet-key
+              optional: true
+        - name: LANGFUSE_PUBLIC_KEY
+          valueFrom:
+            secretKeyRef:
+              name: k8s-agent-langfuse
+              key: public-key
+              optional: true
+        - name: LANGFUSE_SECRET_KEY
+          valueFrom:
+            secretKeyRef:
+              name: k8s-agent-langfuse
+              key: secret-key
+              optional: true
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+        - name: runtime-store
+          mountPath: /var/lib/flawless
+        - name: runtime-store
+          mountPath: /var/lib/flawless
+        - name: private-algorithms
+          mountPath: /var/lib/flawless-custom
+          readOnly: true
+        - name: runtime-tmp
+          mountPath: /tmp
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            cpu: 1
+            memory: 1Gi
+      volumes:
+      - name: runtime-store
+        persistentVolumeClaim:
+          claimName: flawless-runtime-store
+      - name: private-algorithms
+        secret:
+          secretName: flawless-custom-algorithms
+          optional: true
+      - name: runtime-tmp
+        emptyDir:
+          sizeLimit: 256Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: flawless
+  namespace: k8s-agent
+spec:
+  selector:
+    app: flawless
+  ports:
+  - name: mcp
+    port: 8105
+    targetPort: 8105
+  - name: observability
+    port: 8100
+    targetPort: 8100
+  - name: healing
+    port: 8101
+    targetPort: 8101
+  - name: incident
+    port: 8102
+    targetPort: 8102
+  - name: postmortem
+    port: 8103
+    targetPort: 8103
+  - name: openwebui
+    port: 8200
+    targetPort: 8200

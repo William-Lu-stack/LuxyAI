@@ -1,0 +1,33 @@
+# ============================================================
+# flawless Full Access Operations Binding
+#
+# 用途：
+# - 仅用于私有网络验证环境或经安全部门批准的全局自动化值班模式。
+# - 让 k8s-agent-sa 具备 cluster-admin，能够读取所有 namespace 的日志、
+#   Events、Workload、ConfigMap/Secret 元数据，以及执行节点隔离、PV/PVC、
+#   发布治理等高权限动作。
+#
+# 生产建议：
+# - 默认不要应用本文件；优先使用 rbac.yaml + advanced-ops-clusterrolebindings.yaml。
+# - 如必须应用，请确保 CONSOLE_AUTH_REQUIRED=true、接入组织 SSO、开启审计日志，
+#   并保留 OPS_MUTATION_ENABLED、人工确认和高风险二次确认。
+#
+# 启用：
+#   kubectl apply -f manifests/full-access-ops-clusterrolebinding.yaml
+#
+# 回滚：
+#   kubectl delete -f manifests/full-access-ops-clusterrolebinding.yaml
+# ============================================================
+
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: k8s-agent-full-access-ops
+subjects:
+  - kind: ServiceAccount
+    name: k8s-agent-sa
+    namespace: k8s-agent
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io

@@ -1,0 +1,139 @@
+name: publish-public-images
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Immutable release tag to publish (for example 3.2.2)
+        required: true
+        default: "3.2.2"
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: publish-public-images-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository_owner }}/flawless
+  NODE_EXEC_IMAGE_NAME: ${{ github.repository_owner }}/flawless-node-exec
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Enable multi-architecture builds
+        uses: docker/setup-qemu-action@v3
+
+      - name: Configure Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Sign in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate OCI image metadata
+        id: metadata
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=raw,value=${{ inputs.version }},enable=${{ github.event_name == 'workflow_dispatch' }}
+            type=semver,pattern={{version}}
+            type=sha,prefix=sha-,format=short
+          labels: |
+            org.opencontainers.image.title=Flawless Kubernetes Agent
+            org.opencontainers.image.description=Human-approved, skill-driven Kubernetes SRE agent suite
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.documentation=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=Apache-2.0
+
+      - name: Normalize container package owner
+        id: package-owner
+        shell: bash
+        run: echo "value=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and publish the application image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: backend-runtime
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true
+
+      - name: Build and publish the node executor image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.node-exec
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ steps.package-owner.outputs.value }}/flawless-node-exec:1.36
+            ${{ env.REGISTRY }}/${{ steps.package-owner.outputs.value }}/flawless-node-exec:latest
+          labels: |
+            org.opencontainers.image.title=Flawless Kubernetes Node Executor
+            org.opencontainers.image.description=Short-lived executor used for explicitly approved Kubernetes node operations
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.documentation=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=node-executor
+          cache-to: type=gha,mode=max,scope=node-executor
+          provenance: mode=max
+          sbom: true
+
+  verify-domestic-mirror:
+    needs: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Configure Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Pull and smoke-test images through the mainland mirror
+        shell: bash
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA::7}"
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          app_image="m.daocloud.io/ghcr.io/${owner}/flawless:sha-${short_sha}"
+          node_image="m.daocloud.io/ghcr.io/${owner}/flawless-node-exec:1.36"
+
+          for image in "$app_image" "$node_image"; do
+            pulled=false
+            for attempt in $(seq 1 12); do
+              if docker pull --platform linux/amd64 "$image"; then
+                pulled=true
+                break
+              fi
+              echo "Mirror has not synchronized $image yet (attempt $attempt/12)."
+              sleep 20
+            done
+            test "$pulled" = true
+          done
+
+          docker run --rm --platform linux/amd64 --entrypoint python "$app_image" \
+            -c 'from backend.app.main import app; print("public-app-image-ok", len(app.routes))'
+          docker run --rm --platform linux/amd64 "$node_image" /bin/sh \
+            -c 'command -v chroot >/dev/null; echo public-node-executor-image-ok'

@@ -1,0 +1,50 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: flawless
+  namespace: k8s-agent
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: flawless
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: k8s-agent-api
+  namespace: k8s-agent
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: k8s-agent-api
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: k8s-agent-quota
+  namespace: k8s-agent
+spec:
+  hard:
+    requests.cpu: "8"
+    requests.memory: 16Gi
+    limits.cpu: "20"
+    limits.memory: 40Gi
+    pods: "40"
+    services: "20"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: k8s-agent-default-limits
+  namespace: k8s-agent
+spec:
+  limits:
+    - type: Container
+      defaultRequest:
+        cpu: 50m
+        memory: 64Mi
+      default:
+        cpu: 500m
+        memory: 512Mi

@@ -1,0 +1,18 @@
+Flawless SRE 已部署。
+
+1. 控制台地址：
+{{- if eq .Values.service.type "NodePort" }}
+   http://<任一集群节点IP>:{{ .Values.service.nodePort }}
+{{- else if .Values.ingress.enabled }}
+   https://{{ .Values.ingress.host }}
+{{- else }}
+   kubectl -n {{ include "flawless.namespace" . }} port-forward svc/{{ include "flawless.fullname" . }} 8080:{{ .Values.service.apiPort }}
+{{- end }}
+
+2. 管理员配置模式默认关闭。启用前创建 Secret：
+   kubectl -n {{ include "flawless.namespace" . }} create secret generic {{ .Values.secrets.consoleAuth }} \
+     --from-literal=CONSOLE_BASIC_AUTH_USERNAME=admin \
+     --from-literal=CONSOLE_BASIC_AUTH_PASSWORD='<从密码系统获取>'
+   helm upgrade --install {{ .Release.Name }} {{ .Chart.Name }} -n {{ include "flawless.namespace" . }} --set admin.enabled=true
+
+3. 私有网络 LLM/OAuth、Rancher、Langfuse 凭据必须通过现有 Secret 或外部密钥系统注入，不要写入 values.yaml。
